@@ -11,6 +11,7 @@ export const getallusers = async (req, res) => {
                 about:user.about,
                 tags:user.tags,
                 joinedon:user.joinedon,
+                avatar:user.avatar // include avatar!
             });     
         });
         res.status(200).json(alluserdetails)
