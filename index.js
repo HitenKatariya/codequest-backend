@@ -28,6 +28,21 @@ app.use("/publicspace", publicspaceRoutes);
 app.use("/friends", friendsRoutes);
 app.use("/api", teamsRoutes);
 app.use("/otp", otpRoutes);
+
+// Test Cloudinary configuration
+app.get('/test-cloudinary', (req, res) => {
+    try {
+        const cloudinaryConfig = {
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET ? 'SET' : 'NOT SET'
+        };
+        res.json({ cloudinary: cloudinaryConfig, message: 'Cloudinary config loaded' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send("Codequest is running perfect")
 })

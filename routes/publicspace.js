@@ -7,6 +7,7 @@ import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Temporary: Use local storage until Cloudinary is fixed
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/');
@@ -35,14 +36,23 @@ router.post('/create', auth, upload.single('media'), async (req, res) => {
     // Limit: max 2 posts per day
     const todayCount = await countTodayPosts(userId);
     if (todayCount >= 2) return res.status(403).json({ message: 'Max 2 posts per day allowed' });
+    
     let mediaUrl = null;
     let type = 'text';
+    
     if (req.file) {
+      // Local file path
       mediaUrl = `/uploads/${req.file.filename}`;
+      
+      // Determine type based on file extension
       const ext = path.extname(req.file.originalname).toLowerCase();
-      if ([".jpg", ".jpeg", ".png", ".gif"].includes(ext)) type = 'image';
-      if ([".mp4", ".mov", ".avi", ".webm"].includes(ext)) type = 'video';
+      if (['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext)) {
+        type = 'image';
+      } else if (['.mp4', '.mov', '.avi', '.webm'].includes(ext)) {
+        type = 'video';
+      }
     }
+    
     const post = await Post.create({
       user: userId,
       content: req.body.content,

@@ -6,7 +6,7 @@ import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Set up multer for file uploads
+// Temporary: Use local storage until Cloudinary is fixed
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, 'uploads/');

@@ -7,6 +7,7 @@ import path from 'path';
 
 const router=express.Router();
 
+// Temporary: Use local storage until Cloudinary is fixed
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(process.cwd(), 'uploads/')),
   filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname),
@@ -20,7 +21,16 @@ router.get("/getallusers",getallusers)
 
 router.patch("/update/:id",auth,updateprofile)
 router.post('/upload-avatar', upload.single('avatar'), (req, res) => {
-  res.json({ imageUrl: `/uploads/${req.file.filename}` });
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const imageUrl = `/uploads/${req.file.filename}`;
+    res.json({ imageUrl });
+  } catch (error) {
+    console.error('Avatar upload error:', error);
+    res.status(500).json({ error: 'Upload failed' });
+  }
 });
 
 
