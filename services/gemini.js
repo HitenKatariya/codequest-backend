@@ -16,6 +16,52 @@ function requiredEnv(name) {
   return value;
 }
 
+function normalizeModelId(model) {
+  const raw = String(model || '').trim();
+  if (!raw) return '';
+  // Accept both "gemini-..." and "models/gemini-..." forms.
+  return raw.startsWith('models/') ? raw.slice('models/'.length) : raw;
+}
+
+let cachedGenerateContentModelId = '';
+
+async function listModels(apiKey) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(url, { method: 'GET' });
+
+  if (!response.ok) {
+    const parsed = await parseGeminiError(response);
+    const error = new Error(parsed.message);
+    error.statusCode = parsed.statusCode;
+    throw error;
+  }
+
+  const data = await response.json();
+  const models = Array.isArray(data?.models) ? data.models : [];
+  return models
+    .map((m) => ({
+      name: typeof m?.name === 'string' ? m.name : '',
+      methods: Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : [],
+    }))
+    .filter((m) => m.name);
+}
+
+async function pickGenerateContentModelId(apiKey) {
+  if (cachedGenerateContentModelId) return cachedGenerateContentModelId;
+
+  const models = await listModels(apiKey);
+
+  const supportsGenerate = models.filter((m) => m.methods.includes('generateContent'));
+
+  // Prefer flash models when available, otherwise any generateContent-capable model.
+  const preferred =
+    supportsGenerate.find((m) => m.name.toLowerCase().includes('flash')) ||
+    supportsGenerate[0];
+
+  cachedGenerateContentModelId = normalizeModelId(preferred?.name || '');
+  return cachedGenerateContentModelId;
+}
+
 function normalizeTextParts(parts) {
   if (!Array.isArray(parts)) return '';
   return parts
@@ -51,6 +97,14 @@ async function parseGeminiError(response) {
     };
   }
 
+  if (response.status === 404) {
+    return {
+      statusCode: 404,
+      message:
+        'Gemini model not found/unsupported for this API key. Set GEMINI_MODEL to an available model, or allow the server to auto-pick from ListModels.',
+    };
+  }
+
   // Map common cases to user-friendly status codes
   if (response.status === 401) {
     return {
@@ -73,11 +127,14 @@ async function parseGeminiError(response) {
 
 export async function callGeminiText({ system, user, model }) {
   const apiKey = requiredEnv('GEMINI_API_KEY');
-  const usedModel = model || process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  const envModel = process.env.GEMINI_MODEL;
+  const requestedModel = normalizeModelId(model || envModel || '');
+  const usedModel = requestedModel || (await pickGenerateContentModelId(apiKey)) || 'gemini-1.5-flash';
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    usedModel
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const makeUrl = (modelId) =>
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      normalizeModelId(modelId)
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const body = {
     systemInstruction: system ? { parts: [{ text: system }] } : undefined,
@@ -87,22 +144,36 @@ export async function callGeminiText({ system, user, model }) {
     },
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  const attempt = async (modelId) => {
+    const response = await fetch(makeUrl(modelId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-  if (!response.ok) {
-    const parsed = await parseGeminiError(response);
-    const error = new Error(parsed.message);
-    error.statusCode = parsed.statusCode;
+    if (!response.ok) {
+      const parsed = await parseGeminiError(response);
+      const error = new Error(parsed.message);
+      error.statusCode = parsed.statusCode;
+      throw error;
+    }
+
+    const data = await response.json();
+    return normalizeTextParts(data?.candidates?.[0]?.content?.parts);
+  };
+
+  try {
+    return await attempt(usedModel);
+  } catch (error) {
+    // If the caller set a model (or env var) and it 404s, try auto-pick once.
+    if ((error?.statusCode === 404 || error?.message?.includes('model not found')) && requestedModel) {
+      const fallback = await pickGenerateContentModelId(apiKey);
+      if (fallback && fallback !== requestedModel) {
+        return await attempt(fallback);
+      }
+    }
     throw error;
   }
-
-  const data = await response.json();
-  const text = normalizeTextParts(data?.candidates?.[0]?.content?.parts);
-  return text;
 }
 
 export async function callGeminiJson({ system, user, schemaHint, model }) {
