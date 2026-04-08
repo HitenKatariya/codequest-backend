@@ -1,9 +1,17 @@
 function requiredEnv(name) {
-  const value = process.env[name];
+  let value = process.env[name];
   if (!value) {
     const error = new Error(`Missing required env var: ${name}`);
     error.statusCode = 500;
     throw error;
+  }
+  value = String(value).trim();
+  // Support common .env quoting styles: KEY="..." or KEY='...'
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
   }
   return value;
 }

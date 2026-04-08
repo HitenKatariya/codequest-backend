@@ -1,9 +1,17 @@
 function requiredEnv(name) {
-  const value = process.env[name];
+  let value = process.env[name];
   if (!value) {
     const error = new Error(`${name} is required`);
     error.statusCode = 500;
     throw error;
+  }
+  value = String(value).trim();
+  // Support common .env quoting styles: KEY="..." or KEY='...'
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
   }
   return value;
 }
@@ -30,6 +38,18 @@ async function parseGeminiError(response) {
     payload?.message ||
     response.statusText ||
     'Gemini API request failed';
+
+  if (
+    response.status === 400 &&
+    typeof message === 'string' &&
+    message.toLowerCase().includes('api key not valid')
+  ) {
+    return {
+      statusCode: 401,
+      message:
+        'Invalid Gemini API key. Create a key in Google AI Studio (Gemini API), enable the Generative Language API for that project, then set it as GEMINI_API_KEY on the server and restart/redeploy.',
+    };
+  }
 
   // Map common cases to user-friendly status codes
   if (response.status === 401) {
