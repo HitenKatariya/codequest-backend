@@ -4,7 +4,12 @@ import jwt from "jsonwebtoken"
 export const signup = async (req, res) => {
     const { name, email, password, phone } = req.body;
     try {
-        const extinguser = await users.findOne({ email });
+        if (!email || !password || !name) {
+            return res.status(400).json({ message: "Name, email and password are required" });
+        }
+
+        const normalizedEmail = email.toLowerCase();
+        const extinguser = await users.findOne({ email: normalizedEmail });
         if (extinguser) {
             return res.status(409).json({ message: "User already exist" });
         }
@@ -12,7 +17,7 @@ export const signup = async (req, res) => {
         // Only add phone if provided
         const newUserData = {
             name,
-            email,
+            email: normalizedEmail,
             password: hashedpassword
         };
         if (phone) newUserData.phone = phone;
@@ -37,7 +42,12 @@ export const signup = async (req, res) => {
 export const login = async (req, res) => {
     const { email, password } = req.body;
     try {
-        const extinguser = await users.findOne({ email });
+        if (!email || !password) {
+            return res.status(400).json({ message: "Email and password are required" });
+        }
+
+        const normalizedEmail = email.toLowerCase();
+        const extinguser = await users.findOne({ email: normalizedEmail });
         if (!extinguser) {
             return res.status(404).json({ message: "User does not exists" })
         }
