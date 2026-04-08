@@ -46,6 +46,27 @@ async function listModels(apiKey) {
     .filter((m) => m.name);
 }
 
+async function pickAlternateGenerateContentModelId(apiKey, excludeModelId) {
+  const exclude = normalizeModelId(excludeModelId);
+  const models = await listModels(apiKey);
+  const supportsGenerate = models
+    .filter((m) => m.methods.includes('generateContent'))
+    .map((m) => normalizeModelId(m.name))
+    .filter(Boolean)
+    .filter((id) => id !== exclude);
+
+  if (supportsGenerate.length === 0) return '';
+
+  // If flash is overloaded, try a non-flash model first.
+  const excludeIsFlash = exclude.toLowerCase().includes('flash');
+  if (excludeIsFlash) {
+    return supportsGenerate.find((id) => !id.toLowerCase().includes('flash')) || supportsGenerate[0];
+  }
+
+  // Otherwise prefer flash if present.
+  return supportsGenerate.find((id) => id.toLowerCase().includes('flash')) || supportsGenerate[0];
+}
+
 async function pickGenerateContentModelId(apiKey) {
   if (cachedGenerateContentModelId) return cachedGenerateContentModelId;
 
@@ -151,6 +172,14 @@ async function parseGeminiError(response) {
     };
   }
 
+  if (response.status === 503) {
+    return {
+      statusCode: 503,
+      message:
+        'Gemini is temporarily overloaded (high demand). Please try again in a moment.',
+    };
+  }
+
   // Map common cases to user-friendly status codes
   if (response.status === 401) {
     return {
@@ -168,7 +197,11 @@ async function parseGeminiError(response) {
     };
   }
 
-  return { statusCode: 502, message: `Gemini API error (${response.status}): ${message}` };
+  const statusCode =
+    typeof response.status === 'number' && response.status >= 400 && response.status <= 599
+      ? response.status
+      : 502;
+  return { statusCode, message: `Gemini API error (${response.status}): ${message}` };
 }
 
 export async function callGeminiText({ system, user, model, responseMimeType }) {
@@ -192,21 +225,40 @@ export async function callGeminiText({ system, user, model, responseMimeType }) 
   };
 
   const attempt = async (modelId) => {
-    const response = await fetch(makeUrl(modelId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const maxRetries = 2;
 
-    if (!response.ok) {
+    for (let attemptIndex = 0; attemptIndex <= maxRetries; attemptIndex += 1) {
+      const response = await fetch(makeUrl(modelId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return normalizeTextParts(data?.candidates?.[0]?.content?.parts);
+      }
+
       const parsed = await parseGeminiError(response);
+
+      const retryable = parsed.statusCode === 429 || parsed.statusCode === 503;
+      const shouldRetry = retryable && attemptIndex < maxRetries;
+      if (shouldRetry) {
+        const baseDelayMs = 350;
+        const jitterMs = Math.floor(Math.random() * 120);
+        const delayMs = baseDelayMs * Math.pow(2, attemptIndex) + jitterMs;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
       const error = new Error(parsed.message);
       error.statusCode = parsed.statusCode;
       throw error;
     }
 
-    const data = await response.json();
-    return normalizeTextParts(data?.candidates?.[0]?.content?.parts);
+    const error = new Error('Gemini request failed after retries. Please try again.');
+    error.statusCode = 503;
+    throw error;
   };
 
   try {
@@ -217,6 +269,14 @@ export async function callGeminiText({ system, user, model, responseMimeType }) 
       const fallback = await pickGenerateContentModelId(apiKey);
       if (fallback && fallback !== requestedModel) {
         return await attempt(fallback);
+      }
+    }
+
+    // If Gemini is overloaded, try an alternate model once.
+    if (error?.statusCode === 503) {
+      const alt = await pickAlternateGenerateContentModelId(apiKey, usedModel);
+      if (alt && alt !== usedModel) {
+        return await attempt(alt);
       }
     }
     throw error;
