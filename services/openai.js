@@ -16,6 +16,54 @@ function buildHeaders() {
   };
 }
 
+async function parseOpenAIError(response) {
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  const apiError = payload?.error;
+  const code = apiError?.code;
+  const type = apiError?.type;
+  const message = apiError?.message;
+
+  // Provide friendlier messages for common production issues.
+  if (response.status === 429 && (code === 'insufficient_quota' || type === 'insufficient_quota')) {
+    return {
+      statusCode: 402,
+      message:
+        'OpenAI quota exceeded for this API key. Add billing/credits in OpenAI, or use an API key from a project with available quota.',
+      details: { code, type },
+    };
+  }
+
+  if (response.status === 401) {
+    return {
+      statusCode: 401,
+      message:
+        'OpenAI authentication failed. Verify OPENAI_API_KEY is correct and active on the server environment.',
+      details: { code, type },
+    };
+  }
+
+  if (response.status === 403) {
+    return {
+      statusCode: 403,
+      message:
+        'OpenAI request was forbidden. Check your OpenAI project permissions and allowed models.',
+      details: { code, type },
+    };
+  }
+
+  return {
+    statusCode: 502,
+    message: `OpenAI API error (${response.status}): ${message || response.statusText}`,
+    details: { code, type },
+  };
+}
+
 export async function callOpenAIJson({ system, user, schemaHint, model }) {
   const usedModel = model || process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -40,9 +88,10 @@ export async function callOpenAIJson({ system, user, schemaHint, model }) {
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    const error = new Error(`OpenAI API error (${response.status}): ${text || response.statusText}`);
-    error.statusCode = 502;
+    const parsed = await parseOpenAIError(response);
+    const error = new Error(parsed.message);
+    error.statusCode = parsed.statusCode;
+    error.details = parsed.details;
     throw error;
   }
 
@@ -81,9 +130,10 @@ export async function callOpenAIText({ system, user, model }) {
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    const error = new Error(`OpenAI API error (${response.status}): ${text || response.statusText}`);
-    error.statusCode = 502;
+    const parsed = await parseOpenAIError(response);
+    const error = new Error(parsed.message);
+    error.statusCode = parsed.statusCode;
+    error.details = parsed.details;
     throw error;
   }
 

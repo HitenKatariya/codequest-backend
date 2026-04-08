@@ -1,4 +1,4 @@
-import { callOpenAIJson, callOpenAIText } from '../services/openai.js';
+import { callLLMJson, callLLMText } from '../services/llm.js';
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -13,7 +13,7 @@ export async function improveQuestion(req, res) {
       return res.status(400).json({ message: 'title or body is required' });
     }
 
-    const result = await callOpenAIJson({
+    const result = await callLLMJson({
       system:
         'You are a senior software engineer helping users write high-quality Stack Overflow style questions. Improve clarity, grammar, and structure. Do not change the technical meaning. Keep it concise.',
       user:
@@ -44,7 +44,7 @@ export async function suggestTags(req, res) {
       return res.status(400).json({ message: 'title or body is required' });
     }
 
-    const result = await callOpenAIJson({
+    const result = await callLLMJson({
       system:
         'You suggest 3-5 short, lowercase programming tags. Use hyphens when helpful. Return only tags, no explanations.',
       user:
@@ -76,7 +76,7 @@ export async function generateAnswer(req, res) {
       return res.status(400).json({ message: 'title or body is required' });
     }
 
-    const answer = await callOpenAIText({
+    const answer = await callLLMText({
       system:
         'You are a helpful programming assistant. Provide a clear, actionable answer. If details are missing, state assumptions and offer next steps. Use markdown.',
       user:
