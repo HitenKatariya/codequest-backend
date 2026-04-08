@@ -2,12 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import users from '../models/auth.js';
 import auth from '../middleware/auth.js';
-import { storage as cloudinaryStorage } from '../config/cloudinary.js';
+import { avatarStorage } from '../config/cloudinary.js';
 
 const router = express.Router();
 
 // Use Cloudinary storage for avatars
-const upload = multer({ storage: cloudinaryStorage });
+const upload = multer({ storage: avatarStorage });
 
 // Upload avatar route
 router.post('/upload-avatar', auth, upload.single('avatar'), async (req, res) => {

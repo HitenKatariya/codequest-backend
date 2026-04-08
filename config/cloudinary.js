@@ -8,17 +8,32 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Configure Cloudinary storage for multer
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'codequest', // Folder name in Cloudinary
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+// Cloudinary storages for multer
+// - avatarStorage: images only (including avif)
+// - publicSpaceStorage: images + videos (resource_type: 'auto')
+const avatarStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async () => ({
+    folder: 'codequest/avatars',
+    resource_type: 'image',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif'],
     transformation: [
-      { width: 500, height: 500, crop: 'limit' }, // Auto-resize large images
-      { quality: 'auto' } // Auto-optimize quality
-    ]
-  },
+      { width: 500, height: 500, crop: 'limit' },
+      { quality: 'auto' }
+    ],
+  }),
 });
 
-export { cloudinary, storage };
+const publicSpaceStorage = new CloudinaryStorage({
+  cloudinary,
+  params: async () => ({
+    folder: 'codequest/publicspace',
+    resource_type: 'auto',
+    allowed_formats: [
+      'jpg', 'jpeg', 'png', 'gif', 'webp', 'avif',
+      'mp4', 'mov', 'avi', 'webm'
+    ],
+  }),
+});
+
+export { cloudinary, avatarStorage, publicSpaceStorage };

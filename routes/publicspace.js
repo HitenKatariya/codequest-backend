@@ -3,12 +3,12 @@ import multer from 'multer';
 import Post from '../models/Post.js';
 import users from '../models/auth.js';
 import auth from '../middleware/auth.js';
-import { storage as cloudinaryStorage } from '../config/cloudinary.js';
+import { publicSpaceStorage } from '../config/cloudinary.js';
 
 const router = express.Router();
 
 // Use Cloudinary storage for public space media
-const upload = multer({ storage: cloudinaryStorage });
+const upload = multer({ storage: publicSpaceStorage });
 
 // Helper: count today's posts
 async function countTodayPosts(userId) {
