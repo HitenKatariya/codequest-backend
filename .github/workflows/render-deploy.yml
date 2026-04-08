@@ -1,0 +1,118 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub deployment
+        id: create_deployment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          response=$(curl -sS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO/deployments \
+            -d "{\"ref\":\"$SHA\",\"environment\":\"render-production\",\"required_contexts\":[],\"auto_merge\":false,\"description\":\"Deploy to Render\"}")
+
+          id=$(echo "$response" | jq -r '.id')
+          if [ -z "$id" ] || [ "$id" = "null" ]; then
+            echo "Failed to create deployment. Response:" >&2
+            echo "$response" >&2
+            exit 1
+          fi
+
+          echo "deployment_id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Mark deployment in progress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DEPLOYMENT_ID: ${{ steps.create_deployment.outputs.deployment_id }}
+          SERVICE_URL: ${{ secrets.RENDER_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+
+          payload="{\"state\":\"in_progress\",\"description\":\"Render deploy triggered\"}"
+          if [ -n "${SERVICE_URL:-}" ]; then
+            payload=$(echo "$payload" | jq -c ". + {environment_url: \"$SERVICE_URL\"}")
+          fi
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
+            -d "$payload" > /dev/null
+
+      - name: Trigger Render deploy hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_DEPLOY_HOOK_URL:-}" ]; then
+            echo "Missing secret: RENDER_DEPLOY_HOOK_URL" >&2
+            exit 1
+          fi
+          curl -sS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+
+      - name: Mark deployment success
+        if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DEPLOYMENT_ID: ${{ steps.create_deployment.outputs.deployment_id }}
+          SERVICE_URL: ${{ secrets.RENDER_SERVICE_URL }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          payload=$(jq -c -n \
+            --arg state "success" \
+            --arg desc "Render deploy hook called" \
+            --arg log_url "$RUN_URL" \
+            '{state: $state, description: $desc, log_url: $log_url}')
+
+          if [ -n "${SERVICE_URL:-}" ]; then
+            payload=$(echo "$payload" | jq -c ". + {environment_url: \"$SERVICE_URL\"}")
+          fi
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
+            -d "$payload" > /dev/null
+
+      - name: Mark deployment failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DEPLOYMENT_ID: ${{ steps.create_deployment.outputs.deployment_id }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          payload=$(jq -c -n \
+            --arg state "failure" \
+            --arg desc "Render deploy hook failed" \
+            --arg log_url "$RUN_URL" \
+            '{state: $state, description: $desc, log_url: $log_url}')
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
+            -d "$payload" > /dev/null
