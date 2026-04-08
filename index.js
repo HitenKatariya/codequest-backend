@@ -10,6 +10,7 @@ import publicspaceRoutes from "./routes/publicspace.js"
 import friendsRoutes from "./routes/friends.js"
 import teamsRoutes from "./routes/teams.js"
 import otpRoutes from "./routes/otp.js"
+import aiRoutes from "./routes/ai.js"
 const app = express();
 dotenv.config();
 app.use(express.json({ limit: "30mb", extended: true }))
@@ -28,6 +29,7 @@ app.use("/publicspace", publicspaceRoutes);
 app.use("/friends", friendsRoutes);
 app.use("/api", teamsRoutes);
 app.use("/otp", otpRoutes);
+app.use("/ai", aiRoutes);
 
 // Test Cloudinary configuration
 app.get('/test-cloudinary', (req, res) => {
