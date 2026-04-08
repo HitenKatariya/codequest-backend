@@ -71,6 +71,52 @@ function normalizeTextParts(parts) {
     .trim();
 }
 
+function stripCodeFences(text) {
+  if (typeof text !== 'string') return '';
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('```')) return trimmed;
+
+  const withoutStart = trimmed.replace(/^```[a-zA-Z]*\s*/m, '');
+  return withoutStart.replace(/\s*```\s*$/m, '').trim();
+}
+
+function extractJson(text) {
+  const s = stripCodeFences(text);
+
+  try {
+    return JSON.parse(s);
+  } catch {
+    // continue
+  }
+
+  const startObj = s.indexOf('{');
+  const endObj = s.lastIndexOf('}');
+  if (startObj !== -1 && endObj !== -1 && endObj > startObj) {
+    const candidate = s.slice(startObj, endObj + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // continue
+    }
+  }
+
+  const startArr = s.indexOf('[');
+  const endArr = s.lastIndexOf(']');
+  if (startArr !== -1 && endArr !== -1 && endArr > startArr) {
+    const candidate = s.slice(startArr, endArr + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // continue
+    }
+  }
+
+  const error = new Error('Gemini returned invalid JSON. Please try again.');
+  error.statusCode = 502;
+  error.raw = s.slice(0, 2000);
+  throw error;
+}
+
 async function parseGeminiError(response) {
   let payload;
   try {
@@ -125,7 +171,7 @@ async function parseGeminiError(response) {
   return { statusCode: 502, message: `Gemini API error (${response.status}): ${message}` };
 }
 
-export async function callGeminiText({ system, user, model }) {
+export async function callGeminiText({ system, user, model, responseMimeType }) {
   const apiKey = requiredEnv('GEMINI_API_KEY');
   const envModel = process.env.GEMINI_MODEL;
   const requestedModel = normalizeModelId(model || envModel || '');
@@ -141,6 +187,7 @@ export async function callGeminiText({ system, user, model }) {
     contents: [{ role: 'user', parts: [{ text: user }] }],
     generationConfig: {
       temperature: 0.3,
+      ...(responseMimeType ? { responseMimeType } : null),
     },
   };
 
@@ -184,13 +231,12 @@ export async function callGeminiJson({ system, user, schemaHint, model }) {
       ? `\n\nReturn STRICT JSON only (no markdown, no backticks). Match this schema:\n${schemaHint}`
       : '\n\nReturn STRICT JSON only (no markdown, no backticks).');
 
-  const text = await callGeminiText({ system: fullSystem, user, model });
+  const text = await callGeminiText({
+    system: fullSystem,
+    user,
+    model,
+    responseMimeType: 'application/json',
+  });
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    const error = new Error('Gemini returned invalid JSON. Please try again.');
-    error.statusCode = 502;
-    throw error;
-  }
+  return extractJson(text);
 }
