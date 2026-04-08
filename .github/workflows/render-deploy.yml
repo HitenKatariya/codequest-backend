@@ -22,20 +22,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          response=$(curl -sS -X POST \
+          response=$(curl -fsS -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/$REPO/deployments \
             -d "{\"ref\":\"$SHA\",\"environment\":\"render-production\",\"required_contexts\":[],\"auto_merge\":false,\"description\":\"Deploy to Render\"}")
 
-          id=$(echo "$response" | jq -r '.id')
-          if [ -z "$id" ] || [ "$id" = "null" ]; then
-            echo "Failed to create deployment. Response:" >&2
-            echo "$response" >&2
-            exit 1
-          fi
+          deployment_id=$(python3 - <<'PY'
+          import json, sys
+          data = json.loads(sys.stdin.read())
+          deployment_id = data.get('id')
+          if not deployment_id:
+            raise SystemExit('Missing deployment id in GitHub response')
+          print(deployment_id)
+          PY
+          <<<"$response")
 
-          echo "deployment_id=$id" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
 
       - name: Mark deployment in progress
         env:
@@ -46,14 +50,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          payload="{\"state\":\"in_progress\",\"description\":\"Render deploy triggered\"}"
-          if [ -n "${SERVICE_URL:-}" ]; then
-            payload=$(echo "$payload" | jq -c ". + {environment_url: \"$SERVICE_URL\"}")
-          fi
+          payload=$(python3 - <<'PY'
+          import json, os
+          payload = {"state": "in_progress", "description": "Render deploy triggered"}
+          service_url = os.environ.get('SERVICE_URL', '').strip()
+          if service_url:
+            payload["environment_url"] = service_url
+          print(json.dumps(payload))
+          PY
+          )
 
-          curl -sS -X POST \
+          curl -fsS -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
             -d "$payload" > /dev/null
 
@@ -66,7 +76,7 @@ jobs:
             echo "Missing secret: RENDER_DEPLOY_HOOK_URL" >&2
             exit 1
           fi
-          curl -sS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
 
       - name: Mark deployment success
         if: success()
@@ -79,19 +89,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          payload=$(jq -c -n \
-            --arg state "success" \
-            --arg desc "Render deploy hook called" \
-            --arg log_url "$RUN_URL" \
-            '{state: $state, description: $desc, log_url: $log_url}')
+          payload=$(python3 - <<'PY'
+          import json, os
+          payload = {
+            "state": "success",
+            "description": "Render deploy hook called",
+            "log_url": os.environ.get('RUN_URL', '')
+          }
+          service_url = os.environ.get('SERVICE_URL', '').strip()
+          if service_url:
+            payload["environment_url"] = service_url
+          print(json.dumps(payload))
+          PY
+          )
 
-          if [ -n "${SERVICE_URL:-}" ]; then
-            payload=$(echo "$payload" | jq -c ". + {environment_url: \"$SERVICE_URL\"}")
-          fi
-
-          curl -sS -X POST \
+          curl -fsS -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
             -d "$payload" > /dev/null
 
@@ -105,14 +120,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          payload=$(jq -c -n \
-            --arg state "failure" \
-            --arg desc "Render deploy hook failed" \
-            --arg log_url "$RUN_URL" \
-            '{state: $state, description: $desc, log_url: $log_url}')
+          payload=$(python3 - <<'PY'
+          import json, os
+          payload = {
+            "state": "failure",
+            "description": "Render deploy hook failed",
+            "log_url": os.environ.get('RUN_URL', '')
+          }
+          print(json.dumps(payload))
+          PY
+          )
 
-          curl -sS -X POST \
+          curl -fsS -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
             https://api.github.com/repos/$REPO/deployments/$DEPLOYMENT_ID/statuses \
             -d "$payload" > /dev/null
